@@ -3,17 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <meta name="theme-color" content="#050709" />
-  <title>Runtime / Operator Environment</title>
+  <meta name="theme-color" content="#030608" />
+  <title>Runtime / Shared Brain Environment</title>
   <link rel="stylesheet" href="./styles.css" />
-  <script type="importmap">
-    {
-      "imports": {
-        "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
-        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
-      }
-    }
-  </script>
 </head>
 <body>
   <section id="loginView" class="login-view" aria-label="Logowanie operatora">
@@ -31,7 +23,7 @@
         </div>
       </div>
 
-      <p class="login-copy">Wejście do lokalnego środowiska obserwacji modelu. Ten ekran jest celowo prosty — dopiero po autoryzacji uruchamiany jest renderer 3D.</p>
+      <p class="login-copy">Wejście do przestrzennego środowiska multi-agent. Po autoryzacji uruchamiany jest renderer Babylon.js z WebGPU, gdy przeglądarka go obsługuje.</p>
 
       <form id="loginForm" class="login-form" novalidate>
         <label>
@@ -52,7 +44,7 @@
       <footer class="login-footer">
         <span>DEMO GATE</span>
         <span>123 / 123</span>
-        <span>NO BACKEND AUTH</span>
+        <span>BABYLON RUNTIME</span>
       </footer>
     </main>
   </section>
@@ -62,18 +54,18 @@
 
     <header class="runtime-topbar">
       <div class="brand-lockup">
-        <span class="brand-code">R/01</span>
+        <span class="brand-code">R/02</span>
         <div>
           <strong>LLM RUNTIME</strong>
-          <small>SPATIAL OPERATIONS ENVIRONMENT</small>
+          <small>SHARED BRAIN / MULTI-AGENT SPACE</small>
         </div>
       </div>
 
       <div class="runtime-metrics">
-        <div class="metric"><span>MODEL</span><b>SIM-01</b></div>
+        <div class="metric"><span>ENGINE</span><b id="engineMetric">BOOT</b></div>
+        <div class="metric"><span>BRAIN</span><b>1 SHARED</b></div>
+        <div class="metric"><span>AGENTS</span><b>2 ONLINE</b></div>
         <div class="metric"><span>STATE</span><b class="status-ok"><i></i>READY</b></div>
-        <div class="metric"><span>MEMORY</span><b>3 NODES</b></div>
-        <div class="metric"><span>TOOLS</span><b>3 / 5</b></div>
       </div>
 
       <button id="logoutButton" class="ghost-button">LOG OUT</button>
@@ -81,8 +73,8 @@
 
     <aside class="world-guide">
       <p class="eyebrow">ENVIRONMENT</p>
-      <h2 id="guideTitle">Central Runtime</h2>
-      <p id="guideCopy">Przeciągnij myszą, aby obracać kamerę. Kliknij terminal w przestrzeni, aby otworzyć jego panel roboczy.</p>
+      <h2 id="guideTitle">Shared Brain / Multi-Agent Runtime</h2>
+      <p id="guideCopy">Jeden LLM Brain obsługuje dwa niezależne procesy agentowe. Kliknij Brain, Agent 01, Agent 02 albo jedną ze stacji.</p>
     </aside>
 
     <div class="reticle" aria-hidden="true"><span></span></div>
@@ -90,8 +82,8 @@
     <aside id="stationPanel" class="station-panel is-hidden" aria-live="polite">
       <div class="panel-heading">
         <div>
-          <p id="panelCode" class="eyebrow">ST-00</p>
-          <h2 id="panelTitle">Station</h2>
+          <p id="panelCode" class="eyebrow">NODE-00</p>
+          <h2 id="panelTitle">Runtime node</h2>
         </div>
         <button id="closePanel" class="icon-button" aria-label="Zamknij panel">×</button>
       </div>
@@ -101,11 +93,13 @@
     <footer class="runtime-footer">
       <span>DRAG: ORBIT</span>
       <span>SCROLL: ZOOM</span>
-      <span>CLICK: OPEN STATION</span>
-      <span id="selectionReadout">NO STATION SELECTED</span>
+      <span>CLICK: OPEN NODE</span>
+      <span id="selectionReadout">NO OBJECT SELECTED</span>
     </footer>
   </main>
 
-  <script type="module" src="./app.js"></script>
+  <script src="https://cdn.babylonjs.com/babylon.js"></script>
+  <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+  <script src="./app.js"></script>
 </body>
 </html>

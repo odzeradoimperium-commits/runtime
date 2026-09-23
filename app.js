@@ -1,6 +1,3 @@
-import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-
 const $ = (selector) => document.querySelector(selector);
 
 const loginView = $('#loginView');
@@ -18,79 +15,136 @@ const closePanel = $('#closePanel');
 const selectionReadout = $('#selectionReadout');
 const guideTitle = $('#guideTitle');
 const guideCopy = $('#guideCopy');
+const engineMetric = $('#engineMetric');
 
 const AUTH_KEY = 'runtime-demo-auth';
 
+let engine = null;
+let scene = null;
+let camera = null;
+let engineMode = '';
+let renderStarted = false;
+let pointerDown = null;
+let pointerMoved = false;
+let hoveredMesh = null;
+let time = 0;
+
+const animated = {
+  rotating: [],
+  pulsing: [],
+  floating: [],
+  signals: []
+};
+
 const nodes = [
-  { id: 'brain', code: 'CORE-00', title: 'Shared LLM Brain', description: 'Jeden wspólny model językowy obsługujący wielu agentów.', body: () => `
-    <p>To jest wspólny „mózg” systemu. Agent 01 i Agent 02 nie mają osobnych modeli — oba korzystają z tego samego rdzenia LLM.</p>
-    <div class="panel-card"><strong>MODEL</strong><small>Shared inference core / one set of model weights</small></div>
-    <div class="panel-card"><strong>ROUTING</strong><small>Requests from both agents are routed into the same brain.</small></div>
-    <div class="panel-card"><strong>SEPARATION</strong><small>Agents may have different goals, tools and scratch state while sharing the same model.</small></div>` },
-  { id: 'agent-01', code: 'AG-01', title: 'Agent 01', description: 'Pierwszy autonomiczny wykonawca korzystający ze wspólnego LLM.', body: () => `
-    <p>Agent 01 to warstwa wykonawcza: cel, stan zadania, narzędzia i własny przebieg pracy. Rozumowanie językowe deleguje do wspólnego Brain.</p>
-    <div class="panel-card"><strong>STATE</strong><small>STANDBY / connected to CORE-00</small></div>
-    <div class="panel-card"><strong>ROLE</strong><small>Research + planning</small></div>
-    <div class="panel-card"><strong>BRAIN LINK</strong><small>Shared LLM Brain / bidirectional</small></div>` },
-  { id: 'agent-02', code: 'AG-02', title: 'Agent 02', description: 'Drugi autonomiczny wykonawca korzystający z tego samego LLM.', body: () => `
-    <p>Agent 02 ma własny cel i stan wykonania, lecz nie drugi model. To drugi proces agentowy podłączony do tego samego rdzenia językowego.</p>
-    <div class="panel-card"><strong>STATE</strong><small>STANDBY / connected to CORE-00</small></div>
-    <div class="panel-card"><strong>ROLE</strong><small>Execution + verification</small></div>
-    <div class="panel-card"><strong>BRAIN LINK</strong><small>Shared LLM Brain / bidirectional</small></div>` },
+  {
+    id: 'brain',
+    code: 'CORE-00',
+    title: 'Shared LLM Brain',
+    description: 'Jeden wspólny model językowy obsługujący oba procesy agentowe.',
+    body: () => `
+      <p>To jest wspólny mózg systemu. Agent 01 i Agent 02 nie posiadają osobnych modeli — oba kierują inference do tego samego LLM.</p>
+      <div class="panel-card"><strong>MODEL</strong><small>1 shared inference core / shared weights</small></div>
+      <div class="panel-card"><strong>REQUESTS</strong><small>Agent 01 ↔ Brain ↔ Agent 02</small></div>
+      <div class="panel-card"><strong>SEPARATION</strong><small>Role, tools, memory scope and task state remain agent-specific.</small></div>`
+  },
+  {
+    id: 'agent-01',
+    code: 'AG-01',
+    title: 'Agent 01',
+    description: 'Agent badawczy korzystający ze wspólnego LLM Brain.',
+    body: () => `
+      <p>Agent 01 zarządza własnym celem, pamięcią roboczą i narzędziami. Warstwę językową deleguje do CORE-00.</p>
+      <div class="panel-card"><strong>ROLE</strong><small>Research + planning</small></div>
+      <div class="panel-card"><strong>STATE</strong><small>ONLINE / idle loop</small></div>
+      <div class="panel-card"><strong>BRAIN LINK</strong><small>CORE-00 / bidirectional</small></div>`
+  },
+  {
+    id: 'agent-02',
+    code: 'AG-02',
+    title: 'Agent 02',
+    description: 'Agent wykonawczy korzystający z tego samego LLM Brain.',
+    body: () => `
+      <p>Agent 02 ma odrębny stan wykonania i zestaw narzędzi, ale używa dokładnie tego samego rdzenia językowego.</p>
+      <div class="panel-card"><strong>ROLE</strong><small>Execution + verification</small></div>
+      <div class="panel-card"><strong>STATE</strong><small>ONLINE / idle loop</small></div>
+      <div class="panel-card"><strong>BRAIN LINK</strong><small>CORE-00 / bidirectional</small></div>`
+  }
 ];
 
 const stations = [
-  { id: 'prompt', code: 'ST-01', title: 'Prompt Console', angle: -Math.PI / 2, description: 'Compose and submit operator prompts.', body: () => `<p>Operator input trafia do agenta, a następnie do wspólnego Brain.</p><div class="panel-card"><strong>INPUT ROUTE</strong><small>Operator → Agent → Shared Brain</small></div><div class="panel-card"><strong>NEXT</strong><small>Real prompt editor, task assignment and streamed output.</small></div>` },
-  { id: 'memory', code: 'ST-02', title: 'Memory', angle: -Math.PI / 6, description: 'Inspect shared and agent-scoped memory.', body: () => `<p>Pamięć może być wspólna dla środowiska albo przypisana do konkretnego agenta.</p><div class="panel-card"><strong>SHARED MEMORY</strong><small>Knowledge available to Agent 01 and Agent 02.</small></div><div class="panel-card"><strong>AGENT SCRATCH</strong><small>Short-lived working state can remain agent-specific.</small></div>` },
-  { id: 'tools', code: 'ST-03', title: 'Tools', angle: Math.PI / 6, description: 'Capabilities available to agents.', body: () => `<p>Narzędzia są przypisywane agentom, nie samemu modelowi.</p><div class="panel-card"><strong>Agent 01</strong><small>web.search · files.read · planner</small></div><div class="panel-card"><strong>Agent 02</strong><small>db.query · verifier · executor</small></div>` },
-  { id: 'runtime', code: 'ST-04', title: 'Runtime', angle: Math.PI / 2, description: 'Observe shared inference and concurrent agent activity.', body: () => `<p>Runtime rozdziela „kto wykonuje zadanie” od „jaki model wykonuje inference”.</p><div class="panel-card"><strong>BRAIN</strong><small>1 shared inference core</small></div><div class="panel-card"><strong>AGENTS</strong><small>2 independent execution loops</small></div>` },
-  { id: 'events', code: 'ST-05', title: 'Events', angle: 5 * Math.PI / 6, description: 'Inspect system, agent and tool events.', body: () => `<p>Event stream rozdziela zdarzenia modelu, agentów i narzędzi.</p><div class="panel-card"><strong>CORE</strong><small>Inference request accepted.</small></div><div class="panel-card"><strong>AG-01</strong><small>Waiting for task.</small></div><div class="panel-card"><strong>AG-02</strong><small>Waiting for task.</small></div>` },
-  { id: 'world', code: 'ST-06', title: 'World Context', angle: 7 * Math.PI / 6, description: 'Shared operational context visible to both agents.', body: () => `<p>Wspólny stan świata może być obserwowany przez oba procesy agentowe.</p><div class="panel-card"><strong>LOCATION</strong><small>Node 04 / Warsaw</small></div><div class="panel-card"><strong>OBJECTIVE</strong><small>Explore a spatial multi-agent LLM runtime.</small></div><div class="panel-card"><strong>CONSTRAINT</strong><small>Prototype / no production actions.</small></div>` },
+  {
+    id: 'prompt',
+    code: 'ST-01',
+    title: 'Prompt Console',
+    angle: -Math.PI / 2,
+    description: 'Operator input and task assignment.',
+    body: () => `
+      <p>Operator może kierować zadanie do konkretnego agenta, który następnie używa wspólnego Brain.</p>
+      <div class="panel-card"><strong>ROUTE A</strong><small>Operator → Agent 01 → CORE-00</small></div>
+      <div class="panel-card"><strong>ROUTE B</strong><small>Operator → Agent 02 → CORE-00</small></div>`
+  },
+  {
+    id: 'memory',
+    code: 'ST-02',
+    title: 'Memory',
+    angle: -Math.PI / 6,
+    description: 'Shared memory and agent-scoped scratch state.',
+    body: () => `
+      <p>Warstwa pamięci rozróżnia dane współdzielone od pamięci roboczej konkretnego procesu.</p>
+      <div class="panel-card"><strong>SHARED</strong><small>World knowledge available to both agents.</small></div>
+      <div class="panel-card"><strong>SCOPED</strong><small>Agent-specific scratch and task state.</small></div>`
+  },
+  {
+    id: 'tools',
+    code: 'ST-03',
+    title: 'Tools',
+    angle: Math.PI / 6,
+    description: 'Capabilities assigned to execution loops.',
+    body: () => `
+      <p>Narzędzia należą do agentów. Brain jest wspólnym silnikiem językowym, nie właścicielem tooli.</p>
+      <div class="panel-card"><strong>AG-01</strong><small>search · files · planner</small></div>
+      <div class="panel-card"><strong>AG-02</strong><small>query · verifier · executor</small></div>`
+  },
+  {
+    id: 'runtime',
+    code: 'ST-04',
+    title: 'Runtime',
+    angle: Math.PI / 2,
+    description: 'Engine state, inference routing and render backend.',
+    body: () => `
+      <p>Runtime rozdziela procesy agentowe od wspólnego inference core.</p>
+      <div class="panel-card"><strong>ENGINE</strong><small>${engineMode || 'initializing'}</small></div>
+      <div class="panel-card"><strong>BRAIN</strong><small>1 shared LLM</small></div>
+      <div class="panel-card"><strong>AGENTS</strong><small>2 independent execution loops</small></div>`
+  },
+  {
+    id: 'events',
+    code: 'ST-05',
+    title: 'Events',
+    angle: 5 * Math.PI / 6,
+    description: 'System, agent and inference events.',
+    body: () => `
+      <p>Warstwa zdarzeń pokazuje przepływ między agentami, Brain i narzędziami.</p>
+      <div class="panel-card"><strong>CORE</strong><small>Inference service ready.</small></div>
+      <div class="panel-card"><strong>AG-01</strong><small>Connected to CORE-00.</small></div>
+      <div class="panel-card"><strong>AG-02</strong><small>Connected to CORE-00.</small></div>`
+  },
+  {
+    id: 'world',
+    code: 'ST-06',
+    title: 'World Context',
+    angle: 7 * Math.PI / 6,
+    description: 'Shared operational state visible to both agents.',
+    body: () => `
+      <p>Wspólny kontekst świata jest dostępny dla obu agentów, ale każdy może z niego korzystać inaczej.</p>
+      <div class="panel-card"><strong>LOCATION</strong><small>Node 04 / Warsaw</small></div>
+      <div class="panel-card"><strong>OBJECTIVE</strong><small>Explore a spatial multi-agent runtime.</small></div>
+      <div class="panel-card"><strong>CONSTRAINT</strong><small>Prototype / no production actions.</small></div>`
+  }
 ];
 
 const targetMeta = new Map([...nodes, ...stations].map((item) => [item.id, item]));
-
-let renderer, scene, camera, controls, animationFrame, raycaster, pointer, pointerDown = null, hoveredTarget = null;
-const clickTargets = [];
-const movingSignals = [];
-const rotatingObjects = [];
-const floatingObjects = [];
-const pulseObjects = [];
-
-function authenticate() {
-  sessionStorage.setItem(AUTH_KEY, '1');
-  loginView.classList.add('is-hidden');
-  runtimeView.classList.remove('is-hidden');
-  init3D();
-}
-
-function logout() {
-  sessionStorage.removeItem(AUTH_KEY);
-  if (animationFrame) cancelAnimationFrame(animationFrame);
-  runtimeView.classList.add('is-hidden');
-  loginView.classList.remove('is-hidden');
-  loginInput.value = '';
-  passwordInput.value = '';
-  loginError.textContent = '';
-  closeTarget();
-}
-
-loginForm.addEventListener('submit', (event) => {
-  event.preventDefault();
-  const login = loginInput.value.trim();
-  const password = passwordInput.value;
-  if (login === '123' && password === '123') {
-    loginError.textContent = '';
-    authenticate();
-  } else {
-    loginError.textContent = 'Nieprawidłowy login lub hasło.';
-    passwordInput.value = '';
-    passwordInput.focus();
-  }
-});
-
-logoutButton.addEventListener('click', logout);
-closePanel.addEventListener('click', closeTarget);
 
 function openTarget(id) {
   const target = targetMeta.get(id);
@@ -111,149 +165,697 @@ function closeTarget() {
   guideCopy.textContent = 'Jeden LLM Brain obsługuje dwa niezależne procesy agentowe. Kliknij Brain, Agent 01, Agent 02 albo jedną ze stacji.';
 }
 
-function makeLabelSprite(text, subtitle, accent = '#63d5e8') {
-  const canvas = document.createElement('canvas');
-  canvas.width = 640; canvas.height = 180;
-  const ctx = canvas.getContext('2d');
-  ctx.fillStyle = 'rgba(3,10,14,.9)';
-  ctx.strokeStyle = accent; ctx.lineWidth = 2;
-  ctx.fillRect(3, 3, 634, 174); ctx.strokeRect(3, 3, 634, 174);
-  ctx.fillStyle = '#e8f5f7'; ctx.font = '600 30px system-ui, sans-serif'; ctx.fillText(text, 30, 72);
-  ctx.fillStyle = '#76929d'; ctx.font = '600 19px ui-monospace, monospace'; ctx.fillText(subtitle, 30, 118);
-  const texture = new THREE.CanvasTexture(canvas); texture.colorSpace = THREE.SRGBColorSpace;
-  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false }));
-  sprite.scale.set(2.8, .79, 1);
-  return sprite;
+async function authenticate() {
+  sessionStorage.setItem(AUTH_KEY, '1');
+  loginView.classList.add('is-hidden');
+  runtimeView.classList.remove('is-hidden');
+  await initRuntime();
 }
 
-function addHitbox(parent, size, position, targetId) {
-  const hitbox = new THREE.Mesh(new THREE.BoxGeometry(size.x, size.y, size.z), new THREE.MeshBasicMaterial({ transparent: true, opacity: .001, depthWrite: false }));
-  hitbox.position.copy(position); hitbox.userData.targetId = targetId; parent.add(hitbox); clickTargets.push(hitbox);
+function logout() {
+  sessionStorage.removeItem(AUTH_KEY);
+  runtimeView.classList.add('is-hidden');
+  loginView.classList.remove('is-hidden');
+  loginInput.value = '';
+  passwordInput.value = '';
+  loginError.textContent = '';
+  closeTarget();
 }
 
-function addDataLink(from, to, color, offset = 0, height = 3.6) {
-  const midpoint = from.clone().lerp(to, .5); midpoint.y = Math.max(from.y, to.y) + height;
-  const curve = new THREE.QuadraticBezierCurve3(from.clone(), midpoint, to.clone());
-  scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(curve.getPoints(64)), new THREE.LineBasicMaterial({ color, transparent: true, opacity: .58 })));
-  for (let i = 0; i < 2; i += 1) {
-    const signal = new THREE.Mesh(new THREE.SphereGeometry(.055, 10, 10), new THREE.MeshBasicMaterial({ color }));
-    scene.add(signal); movingSignals.push({ curve, signal, offset: (offset + i * .42) % 1, speed: .07 + i * .012 });
+loginForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const login = loginInput.value.trim();
+  const password = passwordInput.value;
+  if (login === '123' && password === '123') {
+    loginError.textContent = '';
+    await authenticate();
+  } else {
+    loginError.textContent = 'Nieprawidłowy login lub hasło.';
+    passwordInput.value = '';
+    passwordInput.focus();
+  }
+});
+
+logoutButton.addEventListener('click', logout);
+closePanel.addEventListener('click', closeTarget);
+
+function color(hex) {
+  return BABYLON.Color3.FromHexString(hex);
+}
+
+function emissiveMaterial(name, sceneRef, hex, intensity = 1) {
+  const mat = new BABYLON.PBRMaterial(name, sceneRef);
+  mat.albedoColor = color('#061015');
+  mat.metallic = 0.72;
+  mat.roughness = 0.28;
+  mat.emissiveColor = color(hex).scale(intensity);
+  return mat;
+}
+
+function darkMetal(name, sceneRef, tint = '#0b151b') {
+  const mat = new BABYLON.PBRMaterial(name, sceneRef);
+  mat.albedoColor = color(tint);
+  mat.metallic = 0.9;
+  mat.roughness = 0.26;
+  return mat;
+}
+
+function makeHitbox(name, parent, targetId, size, position) {
+  const box = BABYLON.MeshBuilder.CreateBox(name, {
+    width: size.x,
+    height: size.y,
+    depth: size.z
+  }, scene);
+  box.parent = parent;
+  box.position.copyFrom(position);
+  box.visibility = 0.001;
+  box.isPickable = true;
+  box.metadata = { targetId, hitbox: true };
+  return box;
+}
+
+function makeRing(name, radius, tube, hex, parent, rotation, alpha = 1) {
+  const ring = BABYLON.MeshBuilder.CreateTorus(name, {
+    diameter: radius * 2,
+    thickness: tube,
+    tessellation: 96
+  }, scene);
+  if (parent) ring.parent = parent;
+  ring.rotation.copyFrom(rotation);
+  const mat = new BABYLON.StandardMaterial(`${name}-mat`, scene);
+  mat.diffuseColor = BABYLON.Color3.Black();
+  mat.emissiveColor = color(hex);
+  mat.alpha = alpha;
+  ring.material = mat;
+  ring.isPickable = false;
+  return ring;
+}
+
+function makeDataLink(name, from, to, hex, offset = 0) {
+  const mid = BABYLON.Vector3.Lerp(from, to, 0.5);
+  mid.y += 3.2;
+  const curve = BABYLON.Curve3.CreateQuadraticBezier(from, mid, to, 72);
+  const points = curve.getPoints();
+
+  const tube = BABYLON.MeshBuilder.CreateTube(`${name}-tube`, {
+    path: points,
+    radius: 0.018,
+    tessellation: 12,
+    cap: BABYLON.Mesh.NO_CAP
+  }, scene);
+  const tubeMat = new BABYLON.StandardMaterial(`${name}-tube-mat`, scene);
+  tubeMat.diffuseColor = BABYLON.Color3.Black();
+  tubeMat.emissiveColor = color(hex).scale(0.75);
+  tubeMat.alpha = 0.42;
+  tube.material = tubeMat;
+  tube.isPickable = false;
+
+  for (let i = 0; i < 3; i += 1) {
+    const orb = BABYLON.MeshBuilder.CreateSphere(`${name}-signal-${i}`, {
+      diameter: i === 0 ? 0.13 : 0.09,
+      segments: 12
+    }, scene);
+    const orbMat = new BABYLON.StandardMaterial(`${name}-signal-mat-${i}`, scene);
+    orbMat.diffuseColor = BABYLON.Color3.Black();
+    orbMat.emissiveColor = color(hex).scale(1.5);
+    orb.material = orbMat;
+    orb.isPickable = false;
+    animated.signals.push({
+      mesh: orb,
+      points,
+      offset: (offset + i * 0.29) % 1,
+      speed: 0.06 + i * 0.012
+    });
   }
 }
 
 function createBrain() {
-  const group = new THREE.Group(); group.position.set(0, 2.65, 0); scene.add(group);
-  const column = new THREE.Mesh(new THREE.CylinderGeometry(.24, .52, 4.8, 48, 1, true), new THREE.MeshBasicMaterial({ color: 0x2ab7d0, transparent: true, opacity: .055, side: THREE.DoubleSide, depthWrite: false }));
-  column.position.y = -.65; group.add(column);
-  const inner = new THREE.Mesh(new THREE.SphereGeometry(.73, 48, 32), new THREE.MeshStandardMaterial({ color: 0x071319, emissive: 0x20b8d4, emissiveIntensity: 2.2, metalness: .62, roughness: .22, transparent: true, opacity: .94 }));
-  group.add(inner); pulseObjects.push({ object: inner, base: 1, amount: .045, speed: 2.4 });
-  const shell = new THREE.Mesh(new THREE.IcosahedronGeometry(1.28, 2), new THREE.MeshStandardMaterial({ color: 0x123b47, emissive: 0x0d7a90, emissiveIntensity: 1.2, wireframe: true, transparent: true, opacity: .9 }));
-  group.add(shell); rotatingObjects.push({ object: shell, x: .09, y: .16, z: .025 });
-  const shell2 = new THREE.Mesh(new THREE.IcosahedronGeometry(1.64, 1), new THREE.MeshBasicMaterial({ color: 0x286979, wireframe: true, transparent: true, opacity: .24 }));
-  group.add(shell2); rotatingObjects.push({ object: shell2, x: -.045, y: -.075, z: .018 });
-  [
-    { r: 1.78, tube: .025, color: 0x63d5e8, rot: [Math.PI / 2, 0, 0], speed: .13 },
-    { r: 2.05, tube: .018, color: 0x345dff, rot: [.75, .35, 0], speed: -.095 },
-    { r: 2.28, tube: .014, color: 0x63d6a2, rot: [1.2, -.42, .4], speed: .065 },
-  ].forEach((d) => {
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(d.r, d.tube, 10, 160), new THREE.MeshBasicMaterial({ color: d.color, transparent: true, opacity: .8 }));
-    ring.rotation.set(...d.rot); group.add(ring); rotatingObjects.push({ object: ring, x: d.speed * .2, y: d.speed, z: d.speed * .13 });
-  });
-  const neuralGeometry = new THREE.BufferGeometry(); const positions = [];
-  for (let i = 0; i < 120; i += 1) {
-    const phi = Math.acos(2 * Math.random() - 1), theta = Math.random() * Math.PI * 2, radius = 1.4 + Math.random() * 1.15;
-    positions.push(radius * Math.sin(phi) * Math.cos(theta), radius * Math.cos(phi), radius * Math.sin(phi) * Math.sin(theta));
+  const root = new BABYLON.TransformNode('brain-root', scene);
+  root.position.set(0, 3.0, 0);
+
+  const inner = BABYLON.MeshBuilder.CreateIcoSphere('brain-inner', {
+    radius: 0.82,
+    subdivisions: 4
+  }, scene);
+  inner.parent = root;
+  inner.material = emissiveMaterial('brain-inner-mat', scene, '#42d9f5', 0.55);
+  inner.isPickable = false;
+  animated.pulsing.push({ mesh: inner, base: 1, amount: 0.07, speed: 2.3, phase: 0 });
+
+  const shell = BABYLON.MeshBuilder.CreateIcoSphere('brain-shell', {
+    radius: 1.42,
+    subdivisions: 2,
+    flat: true
+  }, scene);
+  shell.parent = root;
+  const shellMat = new BABYLON.StandardMaterial('brain-shell-mat', scene);
+  shellMat.wireframe = true;
+  shellMat.emissiveColor = color('#31a9c3');
+  shellMat.alpha = 0.82;
+  shell.material = shellMat;
+  shell.isPickable = false;
+  animated.rotating.push({ node: shell, x: 0.09, y: 0.17, z: 0.035 });
+
+  const outer = BABYLON.MeshBuilder.CreateIcoSphere('brain-outer-shell', {
+    radius: 1.78,
+    subdivisions: 1,
+    flat: true
+  }, scene);
+  outer.parent = root;
+  const outerMat = new BABYLON.StandardMaterial('brain-outer-mat', scene);
+  outerMat.wireframe = true;
+  outerMat.emissiveColor = color('#234f63');
+  outerMat.alpha = 0.36;
+  outer.material = outerMat;
+  outer.isPickable = false;
+  animated.rotating.push({ node: outer, x: -0.04, y: -0.08, z: 0.02 });
+
+  const ring1 = makeRing('brain-ring-1', 2.0, 0.045, '#63d5e8', root, new BABYLON.Vector3(Math.PI / 2, 0, 0), 0.92);
+  const ring2 = makeRing('brain-ring-2', 2.3, 0.034, '#5573ff', root, new BABYLON.Vector3(0.8, 0.35, 0.2), 0.78);
+  const ring3 = makeRing('brain-ring-3', 2.58, 0.026, '#63d6a2', root, new BABYLON.Vector3(1.18, -0.42, 0.4), 0.64);
+  animated.rotating.push(
+    { node: ring1, x: 0.02, y: 0.14, z: 0.03 },
+    { node: ring2, x: -0.05, y: -0.095, z: 0.025 },
+    { node: ring3, x: 0.065, y: 0.05, z: -0.04 }
+  );
+
+  const halo = BABYLON.MeshBuilder.CreateCylinder('brain-halo', {
+    diameterTop: 0.52,
+    diameterBottom: 1.5,
+    height: 5.5,
+    tessellation: 48
+  }, scene);
+  halo.parent = root;
+  halo.position.y = -0.65;
+  const haloMat = new BABYLON.StandardMaterial('brain-halo-mat', scene);
+  haloMat.emissiveColor = color('#1ebbd3');
+  haloMat.alpha = 0.055;
+  haloMat.backFaceCulling = false;
+  halo.material = haloMat;
+  halo.isPickable = false;
+
+  for (let i = 0; i < 54; i += 1) {
+    const node = BABYLON.MeshBuilder.CreateSphere(`neural-${i}`, {
+      diameter: i % 7 === 0 ? 0.095 : 0.055,
+      segments: 6
+    }, scene);
+    node.parent = root;
+    const phi = Math.acos(2 * Math.random() - 1);
+    const theta = Math.random() * Math.PI * 2;
+    const r = 1.62 + Math.random() * 1.18;
+    node.position.set(
+      r * Math.sin(phi) * Math.cos(theta),
+      r * Math.cos(phi),
+      r * Math.sin(phi) * Math.sin(theta)
+    );
+    const mat = new BABYLON.StandardMaterial(`neural-mat-${i}`, scene);
+    mat.emissiveColor = i % 8 === 0 ? color('#63d6a2') : color('#a4efff');
+    node.material = mat;
+    node.isPickable = false;
+    animated.floating.push({
+      mesh: node,
+      baseY: node.position.y,
+      amount: 0.04 + Math.random() * 0.08,
+      speed: 0.7 + Math.random() * 1.1,
+      phase: Math.random() * Math.PI * 2
+    });
   }
-  neuralGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  const neuralPoints = new THREE.Points(neuralGeometry, new THREE.PointsMaterial({ color: 0xb9f4ff, size: .035, transparent: true, opacity: .72 }));
-  group.add(neuralPoints); rotatingObjects.push({ object: neuralPoints, x: .012, y: -.028, z: .008 });
-  addHitbox(group, new THREE.Vector3(4.3, 4.5, 4.3), new THREE.Vector3(0, 0, 0), 'brain');
-  const label = makeLabelSprite('SHARED LLM BRAIN', 'CORE-00 / ONE MODEL'); label.position.set(0, 5.35, 0); scene.add(label);
+
+  makeHitbox(
+    'brain-hitbox',
+    root,
+    'brain',
+    new BABYLON.Vector3(4.9, 5.0, 4.9),
+    BABYLON.Vector3.Zero()
+  );
+
+  return root;
 }
 
-function createAgent(id, code, labelText, position, accent) {
-  const group = new THREE.Group(); group.position.copy(position); scene.add(group);
-  const base = new THREE.Mesh(new THREE.CylinderGeometry(1.15, 1.42, .34, 8), new THREE.MeshStandardMaterial({ color: 0x091117, metalness: .82, roughness: .3 }));
-  base.position.y = .18; group.add(base);
-  const baseRing = new THREE.Mesh(new THREE.TorusGeometry(1.03, .035, 10, 80), new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: .9 }));
-  baseRing.rotation.x = Math.PI / 2; baseRing.position.y = .39; group.add(baseRing); rotatingObjects.push({ object: baseRing, x: 0, y: 0, z: .12 });
-  const spine = new THREE.Mesh(new THREE.CylinderGeometry(.16, .24, 1.35, 8), new THREE.MeshStandardMaterial({ color: 0x17252c, emissive: accent, emissiveIntensity: .16, metalness: .72, roughness: .25 }));
-  spine.position.y = 1.02; group.add(spine);
-  const body = new THREE.Mesh(new THREE.OctahedronGeometry(.66, 1), new THREE.MeshStandardMaterial({ color: 0x0a1a21, emissive: accent, emissiveIntensity: 1.15, metalness: .52, roughness: .2, transparent: true, opacity: .95 }));
-  body.position.y = 1.78; group.add(body); rotatingObjects.push({ object: body, x: .07, y: .23, z: .04 }); pulseObjects.push({ object: body, base: 1, amount: .055, speed: id === 'agent-01' ? 2.1 : 1.8 });
-  const halo = new THREE.Mesh(new THREE.TorusGeometry(.92, .025, 10, 96), new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: .86 }));
-  halo.position.y = 1.78; halo.rotation.x = Math.PI / 2; group.add(halo); rotatingObjects.push({ object: halo, x: .03, y: -.15, z: .08 });
-  const crown = new THREE.Mesh(new THREE.ConeGeometry(.44, .72, 6, 1, true), new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: .18, side: THREE.DoubleSide }));
-  crown.position.y = 2.55; group.add(crown);
-  const hologram = new THREE.Mesh(new THREE.PlaneGeometry(1.55, .62), new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: .13, side: THREE.DoubleSide, depthWrite: false }));
-  hologram.position.set(0, 1.45, .86); hologram.rotation.x = -.12; group.add(hologram);
-  const frame = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.PlaneGeometry(1.62, .68)), new THREE.LineBasicMaterial({ color: accent, transparent: true, opacity: .8 }));
-  frame.position.copy(hologram.position); frame.rotation.copy(hologram.rotation); group.add(frame);
-  addHitbox(group, new THREE.Vector3(2.8, 3.4, 2.8), new THREE.Vector3(0, 1.45, 0), id);
-  const label = makeLabelSprite(labelText, `${code} / SHARED BRAIN LINK`, `#${accent.toString(16).padStart(6, '0')}`); label.position.copy(position).add(new THREE.Vector3(0, 3.55, 0)); scene.add(label);
-  floatingObjects.push({ object: group, baseY: position.y, amount: .07, speed: id === 'agent-01' ? 1.3 : 1.15, phase: id === 'agent-01' ? 0 : Math.PI });
+function createAgent(id, position, accentHex) {
+  const root = new BABYLON.TransformNode(`${id}-root`, scene);
+  root.position.copyFrom(position);
+
+  const base = BABYLON.MeshBuilder.CreateCylinder(`${id}-base`, {
+    diameterTop: 2.2,
+    diameterBottom: 2.75,
+    height: 0.38,
+    tessellation: 8
+  }, scene);
+  base.parent = root;
+  base.position.y = 0.18;
+  base.material = darkMetal(`${id}-base-mat`, scene);
+  base.isPickable = false;
+
+  const baseRing = makeRing(
+    `${id}-base-ring`,
+    1.08,
+    0.055,
+    accentHex,
+    root,
+    new BABYLON.Vector3(Math.PI / 2, 0, 0),
+    0.95
+  );
+  baseRing.position.y = 0.41;
+
+  const spine = BABYLON.MeshBuilder.CreateCylinder(`${id}-spine`, {
+    diameterTop: 0.30,
+    diameterBottom: 0.48,
+    height: 1.55,
+    tessellation: 10
+  }, scene);
+  spine.parent = root;
+  spine.position.y = 1.08;
+  spine.material = emissiveMaterial(`${id}-spine-mat`, scene, accentHex, 0.13);
+  spine.isPickable = false;
+
+  const chamber = BABYLON.MeshBuilder.CreateCapsule(`${id}-chamber`, {
+    radius: 0.54,
+    height: 1.5,
+    tessellation: 20,
+    subdivisions: 3
+  }, scene);
+  chamber.parent = root;
+  chamber.position.y = 2.08;
+  chamber.material = emissiveMaterial(`${id}-chamber-mat`, scene, accentHex, 0.34);
+  chamber.isPickable = false;
+  animated.pulsing.push({
+    mesh: chamber,
+    base: 1,
+    amount: 0.035,
+    speed: 1.7,
+    phase: id === 'agent-01' ? 0 : Math.PI
+  });
+
+  const crown = makeRing(
+    `${id}-crown`,
+    0.74,
+    0.032,
+    accentHex,
+    root,
+    new BABYLON.Vector3(Math.PI / 2, 0, 0),
+    0.82
+  );
+  crown.position.y = 2.9;
+  animated.rotating.push({ node: crown, x: 0, y: 0.9, z: 0 });
+
+  for (let i = 0; i < 4; i += 1) {
+    const fin = BABYLON.MeshBuilder.CreateBox(`${id}-fin-${i}`, {
+      width: 0.09,
+      height: 1.18,
+      depth: 0.42
+    }, scene);
+    fin.parent = root;
+    const a = (i / 4) * Math.PI * 2;
+    fin.position.set(Math.cos(a) * 0.84, 1.82, Math.sin(a) * 0.84);
+    fin.rotation.y = -a;
+    fin.material = darkMetal(`${id}-fin-mat-${i}`, scene, '#102028');
+    fin.isPickable = false;
+  }
+
+  makeHitbox(
+    `${id}-hitbox`,
+    root,
+    id,
+    new BABYLON.Vector3(3.2, 4.4, 3.2),
+    new BABYLON.Vector3(0, 1.5, 0)
+  );
+
+  return root;
 }
 
 function createStation(station, index) {
-  const radius = 5.55, x = Math.cos(station.angle) * radius, z = Math.sin(station.angle) * radius;
-  const group = new THREE.Group(); group.position.set(x, .48, z); group.lookAt(0, .9, 0); scene.add(group);
-  const plinth = new THREE.Mesh(new THREE.CylinderGeometry(1.15, 1.38, .42, 6), new THREE.MeshStandardMaterial({ color: 0x081116, metalness: .78, roughness: .33 })); group.add(plinth);
-  const lowerRing = new THREE.Mesh(new THREE.TorusGeometry(.92, .025, 8, 70), new THREE.MeshBasicMaterial({ color: index === 0 ? 0x63d5e8 : 0x315e69, transparent: true, opacity: .9 })); lowerRing.rotation.x = Math.PI / 2; lowerRing.position.y = .24; group.add(lowerRing);
-  const strutMat = new THREE.MeshStandardMaterial({ color: 0x17272e, metalness: .7, roughness: .25 });
-  const left = new THREE.Mesh(new THREE.BoxGeometry(.1, 1.2, .1), strutMat); left.position.set(-.58, .85, .08); left.rotation.z = -.15; group.add(left);
-  const right = left.clone(); right.position.x = .58; right.rotation.z = .15; group.add(right);
-  const screen = new THREE.Mesh(new THREE.PlaneGeometry(1.72, .92), new THREE.MeshBasicMaterial({ color: 0x0c3340, transparent: true, opacity: .62, side: THREE.DoubleSide })); screen.position.set(0, 1.22, .22); screen.rotation.x = -.14; group.add(screen);
-  const screenFrame = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.PlaneGeometry(1.82, 1.02)), new THREE.LineBasicMaterial({ color: index === 0 ? 0x63d5e8 : 0x4b7b87, transparent: true, opacity: .9 })); screenFrame.position.copy(screen.position); screenFrame.rotation.copy(screen.rotation); group.add(screenFrame);
-  const emitter = new THREE.Mesh(new THREE.CylinderGeometry(.09, .09, .5, 8), new THREE.MeshBasicMaterial({ color: index % 2 ? 0x63d6a2 : 0x63d5e8, transparent: true, opacity: .82 })); emitter.position.set(0, 1.95, -.05); group.add(emitter);
-  const holoRing = new THREE.Mesh(new THREE.TorusGeometry(.48, .015, 8, 60), new THREE.MeshBasicMaterial({ color: index % 2 ? 0x63d6a2 : 0x63d5e8, transparent: true, opacity: .65 })); holoRing.position.set(0, 1.92, -.05); holoRing.rotation.x = Math.PI / 2; group.add(holoRing); rotatingObjects.push({ object: holoRing, x: 0, y: 0, z: index % 2 ? -.2 : .2 });
-  addHitbox(group, new THREE.Vector3(2.7, 3.1, 2.3), new THREE.Vector3(0, 1.25, 0), station.id);
-  const label = makeLabelSprite(station.title.toUpperCase(), station.code); label.position.set(x, 2.7, z); scene.add(label);
-  addDataLink(new THREE.Vector3(0, 2.65, 0), new THREE.Vector3(x, 1.48, z), index % 2 ? 0x2f7280 : 0x315f6b, index / stations.length, 2.25);
+  const radius = 5.7;
+  const root = new BABYLON.TransformNode(`${station.id}-root`, scene);
+  root.position.set(Math.cos(station.angle) * radius, 0, Math.sin(station.angle) * radius);
+  root.rotation.y = -station.angle + Math.PI / 2;
+
+  const base = BABYLON.MeshBuilder.CreateCylinder(`${station.id}-base`, {
+    diameterTop: 1.65,
+    diameterBottom: 2.0,
+    height: 0.3,
+    tessellation: 6
+  }, scene);
+  base.parent = root;
+  base.position.y = 0.15;
+  base.material = darkMetal(`${station.id}-base-mat`, scene);
+  base.isPickable = false;
+
+  const neck = BABYLON.MeshBuilder.CreateCylinder(`${station.id}-neck`, {
+    diameterTop: 0.22,
+    diameterBottom: 0.42,
+    height: 1.42,
+    tessellation: 8
+  }, scene);
+  neck.parent = root;
+  neck.position.y = 0.96;
+  neck.material = darkMetal(`${station.id}-neck-mat`, scene, '#13242b');
+  neck.isPickable = false;
+
+  const frame = BABYLON.MeshBuilder.CreateBox(`${station.id}-frame`, {
+    width: 1.95,
+    height: 1.2,
+    depth: 0.16
+  }, scene);
+  frame.parent = root;
+  frame.position.set(0, 1.82, 0.09);
+  frame.rotation.x = -0.16;
+  frame.material = darkMetal(`${station.id}-frame-mat`, scene, '#0e1a20');
+  frame.isPickable = false;
+
+  const screen = BABYLON.MeshBuilder.CreatePlane(`${station.id}-screen`, {
+    width: 1.72,
+    height: 0.95
+  }, scene);
+  screen.parent = root;
+  screen.position.set(0, 1.82, 0.185);
+  screen.rotation.x = -0.16;
+  const screenMat = new BABYLON.StandardMaterial(`${station.id}-screen-mat`, scene);
+  screenMat.diffuseColor = BABYLON.Color3.Black();
+  screenMat.emissiveColor = index % 2 ? color('#173f4c') : color('#1b5260');
+  screenMat.alpha = 0.94;
+  screen.material = screenMat;
+  screen.isPickable = false;
+
+  const emitter = makeRing(
+    `${station.id}-emitter`,
+    0.62,
+    0.025,
+    index % 2 ? '#63d5e8' : '#63d6a2',
+    root,
+    new BABYLON.Vector3(Math.PI / 2, 0, 0),
+    0.78
+  );
+  emitter.position.set(0, 2.62, 0);
+  animated.rotating.push({ node: emitter, x: 0, y: 0.5 + index * 0.04, z: 0 });
+
+  makeHitbox(
+    `${station.id}-hitbox`,
+    root,
+    station.id,
+    new BABYLON.Vector3(2.8, 3.2, 2.2),
+    new BABYLON.Vector3(0, 1.45, 0)
+  );
+
+  return root;
 }
 
-function init3D() {
-  if (renderer) { resizeRenderer(); animate(); return; }
-  const canvas = $('#worldCanvas');
-  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.7)); renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.setClearColor(0x020405, 1);
-  scene = new THREE.Scene(); scene.fog = new THREE.FogExp2(0x020405, .034);
-  camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, .1, 120); camera.position.set(0, 7.6, 15.2);
-  controls = new OrbitControls(camera, canvas); controls.enableDamping = true; controls.dampingFactor = .045; controls.target.set(0, 1.7, 0); controls.minDistance = 7; controls.maxDistance = 22; controls.maxPolarAngle = Math.PI * .49; controls.minPolarAngle = Math.PI * .16; controls.enablePan = false;
-  scene.add(new THREE.AmbientLight(0x92b8c4, .24));
-  const brainLight = new THREE.PointLight(0x63d5e8, 34, 32, 2); brainLight.position.set(0, 4.6, 0); scene.add(brainLight);
-  const blueRim = new THREE.PointLight(0x446dff, 14, 24, 2); blueRim.position.set(-6, 3.5, -2); scene.add(blueRim);
-  const greenRim = new THREE.PointLight(0x4ee29e, 11, 22, 2); greenRim.position.set(6, 2.7, 2); scene.add(greenRim);
-  const grid = new THREE.GridHelper(46, 46, 0x24566a, 0x0d2028); grid.material.opacity = .38; grid.material.transparent = true; scene.add(grid);
-  const platform = new THREE.Mesh(new THREE.CylinderGeometry(6.65, 7.25, .48, 12), new THREE.MeshStandardMaterial({ color: 0x071016, metalness: .82, roughness: .34 })); platform.position.y = .2; scene.add(platform);
-  const platformTop = new THREE.Mesh(new THREE.CylinderGeometry(6.35, 6.35, .05, 12), new THREE.MeshStandardMaterial({ color: 0x0b171d, metalness: .65, roughness: .28 })); platformTop.position.y = .46; scene.add(platformTop);
-  [6, 4.1, 2.7].forEach((radius, i) => { const ring = new THREE.Mesh(new THREE.TorusGeometry(radius, i === 0 ? .038 : .018, 8, 150), new THREE.MeshBasicMaterial({ color: i === 1 ? 0x244b56 : 0x4fb7ca, transparent: true, opacity: i === 1 ? .48 : .75 })); ring.rotation.x = Math.PI / 2; ring.position.y = .5 + i * .008; scene.add(ring); });
+function createArchitecture() {
+  const floor = BABYLON.MeshBuilder.CreateCylinder('platform', {
+    diameterTop: 12.8,
+    diameterBottom: 14.1,
+    height: 0.55,
+    tessellation: 96
+  }, scene);
+  floor.position.y = 0.2;
+  floor.material = darkMetal('platform-mat', scene, '#071015');
+  floor.isPickable = false;
+
+  const floorRing = makeRing(
+    'platform-ring',
+    6.15,
+    0.045,
+    '#3a94a8',
+    null,
+    new BABYLON.Vector3(Math.PI / 2, 0, 0),
+    0.7
+  );
+  floorRing.position.y = 0.48;
+
+  const innerRing = makeRing(
+    'platform-inner-ring',
+    3.0,
+    0.025,
+    '#183f49',
+    null,
+    new BABYLON.Vector3(Math.PI / 2, 0, 0),
+    0.7
+  );
+  innerRing.position.y = 0.49;
+
+  for (let i = 0; i < 18; i += 1) {
+    const a = (i / 18) * Math.PI * 2;
+    const height = 2.2 + (i % 5) * 0.44;
+    const pylon = BABYLON.MeshBuilder.CreateBox(`outer-pylon-${i}`, {
+      width: 0.12,
+      height,
+      depth: 0.12
+    }, scene);
+    pylon.position.set(Math.cos(a) * 8.3, height / 2, Math.sin(a) * 8.3);
+    const pylonMat = new BABYLON.StandardMaterial(`outer-pylon-mat-${i}`, scene);
+    pylonMat.emissiveColor = i % 3 === 0 ? color('#2a7889') : color('#173541');
+    pylonMat.alpha = 0.58;
+    pylon.material = pylonMat;
+    pylon.isPickable = false;
+  }
+}
+
+function configurePicking(canvas) {
+  scene.onPointerObservable.add((pointerInfo) => {
+    const e = pointerInfo.event;
+    if (pointerInfo.type === BABYLON.PointerEventTypes.POINTERDOWN) {
+      pointerDown = { x: e.clientX, y: e.clientY };
+      pointerMoved = false;
+    }
+
+    if (pointerInfo.type === BABYLON.PointerEventTypes.POINTERMOVE && pointerDown) {
+      const dx = e.clientX - pointerDown.x;
+      const dy = e.clientY - pointerDown.y;
+      if (Math.hypot(dx, dy) > 7) pointerMoved = true;
+    }
+
+    if (pointerInfo.type === BABYLON.PointerEventTypes.POINTERMOVE) {
+      const pick = scene.pick(scene.pointerX, scene.pointerY, (mesh) => Boolean(mesh?.metadata?.targetId));
+      const nextHovered = pick?.hit ? pick.pickedMesh : null;
+      if (nextHovered !== hoveredMesh) {
+        hoveredMesh = nextHovered;
+        canvas.style.cursor = hoveredMesh ? 'pointer' : 'grab';
+      }
+    }
+
+    if (pointerInfo.type === BABYLON.PointerEventTypes.POINTERUP) {
+      if (!pointerMoved) {
+        const pick = scene.pick(scene.pointerX, scene.pointerY, (mesh) => Boolean(mesh?.metadata?.targetId));
+        const targetId = pick?.pickedMesh?.metadata?.targetId;
+        if (targetId) openTarget(targetId);
+      }
+      pointerDown = null;
+      pointerMoved = false;
+    }
+  });
+}
+
+function createParticles() {
+  const ps = new BABYLON.ParticleSystem('ambient-particles', 900, scene);
+  ps.particleTexture = new BABYLON.Texture(
+    'https://playground.babylonjs.com/textures/flare.png',
+    scene,
+    true,
+    false
+  );
+  ps.emitter = new BABYLON.Vector3(0, 3.0, 0);
+  ps.minEmitBox = new BABYLON.Vector3(-7, -0.8, -7);
+  ps.maxEmitBox = new BABYLON.Vector3(7, 5.5, 7);
+  ps.color1 = new BABYLON.Color4(0.25, 0.78, 0.95, 0.28);
+  ps.color2 = new BABYLON.Color4(0.38, 0.9, 0.67, 0.18);
+  ps.colorDead = new BABYLON.Color4(0.02, 0.08, 0.11, 0);
+  ps.minSize = 0.018;
+  ps.maxSize = 0.07;
+  ps.minLifeTime = 3;
+  ps.maxLifeTime = 7;
+  ps.emitRate = 44;
+  ps.blendMode = BABYLON.ParticleSystem.BLENDMODE_ADD;
+  ps.gravity = BABYLON.Vector3.Zero();
+  ps.direction1 = new BABYLON.Vector3(-0.03, 0.05, -0.03);
+  ps.direction2 = new BABYLON.Vector3(0.03, 0.14, 0.03);
+  ps.minAngularSpeed = 0;
+  ps.maxAngularSpeed = Math.PI;
+  ps.minEmitPower = 0.02;
+  ps.maxEmitPower = 0.06;
+  ps.updateSpeed = 0.016;
+  ps.start();
+}
+
+function updateAnimations() {
+  const dt = engine.getDeltaTime() / 1000;
+  time += dt;
+
+  for (const item of animated.rotating) {
+    item.node.rotation.x += item.x * dt;
+    item.node.rotation.y += item.y * dt;
+    item.node.rotation.z += item.z * dt;
+  }
+
+  for (const item of animated.pulsing) {
+    const s = item.base + Math.sin(time * item.speed + item.phase) * item.amount;
+    item.mesh.scaling.setAll(s);
+  }
+
+  for (const item of animated.floating) {
+    item.mesh.position.y = item.baseY + Math.sin(time * item.speed + item.phase) * item.amount;
+  }
+
+  for (const signal of animated.signals) {
+    const normalized = (time * signal.speed + signal.offset) % 1;
+    const idx = Math.min(signal.points.length - 1, Math.floor(normalized * (signal.points.length - 1)));
+    signal.mesh.position.copyFrom(signal.points[idx]);
+  }
+}
+
+async function createEngine(canvas) {
+  if (navigator.gpu && BABYLON.WebGPUEngine) {
+    try {
+      const webgpu = new BABYLON.WebGPUEngine(canvas, {
+        antialias: true,
+        adaptToDeviceRatio: true
+      });
+      await webgpu.initAsync();
+      engineMode = 'WEBGPU';
+      return webgpu;
+    } catch (error) {
+      console.warn('WebGPU init failed; falling back to WebGL.', error);
+    }
+  }
+
+  engineMode = 'WEBGL2';
+  return new BABYLON.Engine(canvas, true, {
+    preserveDrawingBuffer: false,
+    stencil: true,
+    disableWebGL2Support: false
+  }, true);
+}
+
+async function buildScene(canvas) {
+  scene = new BABYLON.Scene(engine);
+  scene.clearColor = new BABYLON.Color4(0.008, 0.015, 0.02, 1);
+  scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
+  scene.fogColor = color('#020608');
+  scene.fogDensity = 0.025;
+
+  camera = new BABYLON.ArcRotateCamera(
+    'camera',
+    -Math.PI / 2,
+    1.08,
+    15.8,
+    new BABYLON.Vector3(0, 2.0, 0),
+    scene
+  );
+  camera.attachControl(canvas, true);
+  camera.lowerRadiusLimit = 7.6;
+  camera.upperRadiusLimit = 22;
+  camera.lowerBetaLimit = 0.32;
+  camera.upperBetaLimit = 1.45;
+  camera.wheelDeltaPercentage = 0.012;
+  camera.panningSensibility = 0;
+  camera.inertia = 0.84;
+
+  const hemi = new BABYLON.HemisphericLight('hemi', new BABYLON.Vector3(0, 1, 0), scene);
+  hemi.intensity = 0.32;
+  hemi.diffuse = color('#9bdde8');
+  hemi.groundColor = color('#05080b');
+
+  const brainLight = new BABYLON.PointLight('brain-light', new BABYLON.Vector3(0, 4.2, 0), scene);
+  brainLight.diffuse = color('#63d5e8');
+  brainLight.intensity = 14;
+  brainLight.range = 18;
+
+  const sideLightA = new BABYLON.PointLight('side-a', new BABYLON.Vector3(-6, 3.8, 0), scene);
+  sideLightA.diffuse = color('#63d6a2');
+  sideLightA.intensity = 5.5;
+  sideLightA.range = 12;
+
+  const sideLightB = new BABYLON.PointLight('side-b', new BABYLON.Vector3(6, 3.8, 0), scene);
+  sideLightB.diffuse = color('#6d7dff');
+  sideLightB.intensity = 5.5;
+  sideLightB.range = 12;
+
+  const glow = new BABYLON.GlowLayer('glow', scene, {
+    mainTextureFixedSize: 1024,
+    blurKernelSize: 64
+  });
+  glow.intensity = 0.75;
+
+  const pipeline = new BABYLON.DefaultRenderingPipeline('pipeline', true, scene, [camera]);
+  pipeline.bloomEnabled = true;
+  pipeline.bloomThreshold = 0.72;
+  pipeline.bloomWeight = 0.22;
+  pipeline.bloomKernel = 56;
+  pipeline.fxaaEnabled = true;
+
+  createArchitecture();
   createBrain();
-  const agent01Pos = new THREE.Vector3(-3.15, .48, 1.55), agent02Pos = new THREE.Vector3(3.15, .48, 1.55);
-  createAgent('agent-01', 'AG-01', 'AGENT 01', agent01Pos, 0x63d5e8); createAgent('agent-02', 'AG-02', 'AGENT 02', agent02Pos, 0x63d6a2);
-  addDataLink(new THREE.Vector3(-3.15, 2.25, 1.55), new THREE.Vector3(-.55, 2.95, .15), 0x63d5e8, .08, 1.45);
-  addDataLink(new THREE.Vector3(3.15, 2.25, 1.55), new THREE.Vector3(.55, 2.95, .15), 0x63d6a2, .48, 1.45);
-  stations.forEach(createStation);
-  for (let i = 0; i < 16; i += 1) { const a = (i / 16) * Math.PI * 2, radius = 8.4, height = 1.5 + (i % 5) * .5; const pylon = new THREE.Mesh(new THREE.BoxGeometry(.11, height, .11), new THREE.MeshBasicMaterial({ color: i % 4 === 0 ? 0x285f6e : 0x142d35, transparent: true, opacity: .58 })); pylon.position.set(Math.cos(a) * radius, height / 2, Math.sin(a) * radius); scene.add(pylon); }
-  raycaster = new THREE.Raycaster(); pointer = new THREE.Vector2();
-  canvas.addEventListener('pointerdown', handlePointerDown); canvas.addEventListener('pointerup', handlePointerUp); canvas.addEventListener('pointermove', handlePointerMove); canvas.addEventListener('pointerleave', () => { pointerDown = null; renderer.domElement.style.cursor = 'grab'; }); window.addEventListener('resize', resizeRenderer);
-  closeTarget(); resizeRenderer(); animate();
+
+  const agent1Pos = new BABYLON.Vector3(-4.0, 0.5, 0.25);
+  const agent2Pos = new BABYLON.Vector3(4.0, 0.5, 0.25);
+  createAgent('agent-01', agent1Pos, '#63d6a2');
+  createAgent('agent-02', agent2Pos, '#6d7dff');
+
+  makeDataLink(
+    'brain-to-agent-01',
+    new BABYLON.Vector3(-1.2, 3.1, 0),
+    agent1Pos.add(new BABYLON.Vector3(0, 2.2, 0)),
+    '#63d6a2',
+    0.1
+  );
+  makeDataLink(
+    'brain-to-agent-02',
+    new BABYLON.Vector3(1.2, 3.1, 0),
+    agent2Pos.add(new BABYLON.Vector3(0, 2.2, 0)),
+    '#6d7dff',
+    0.52
+  );
+
+  stations.forEach((station, index) => {
+    const root = createStation(station, index);
+    const stationWorld = root.position.add(new BABYLON.Vector3(0, 1.7, 0));
+    makeDataLink(
+      `brain-to-${station.id}`,
+      new BABYLON.Vector3(0, 2.6, 0),
+      stationWorld,
+      index % 2 ? '#2f7381' : '#376b72',
+      index / stations.length
+    );
+  });
+
+  createParticles();
+  configurePicking(canvas);
+  scene.registerBeforeRender(updateAnimations);
+  return scene;
 }
 
-function setPointerFromEvent(event) { const rect = renderer.domElement.getBoundingClientRect(); pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1; pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1; }
-function getTargetAtPointer(event) { setPointerFromEvent(event); raycaster.setFromCamera(pointer, camera); const hit = raycaster.intersectObjects(clickTargets, false)[0]; return hit?.object?.userData?.targetId || null; }
-function handlePointerDown(event) { pointerDown = { x: event.clientX, y: event.clientY, time: performance.now() }; }
-function handlePointerUp(event) { if (!pointerDown) return; const dx = event.clientX - pointerDown.x, dy = event.clientY - pointerDown.y, distance = Math.hypot(dx, dy), duration = performance.now() - pointerDown.time; pointerDown = null; if (distance > 9 || duration > 700) return; const targetId = getTargetAtPointer(event); if (targetId) openTarget(targetId); }
-function handlePointerMove(event) { if (pointerDown) { const moved = Math.hypot(event.clientX - pointerDown.x, event.clientY - pointerDown.y); if (moved > 9) renderer.domElement.style.cursor = 'grabbing'; return; } const targetId = getTargetAtPointer(event); if (targetId !== hoveredTarget) hoveredTarget = targetId; renderer.domElement.style.cursor = targetId ? 'pointer' : 'grab'; }
-function resizeRenderer() { if (!renderer || !camera) return; const width = window.innerWidth, height = window.innerHeight; renderer.setSize(width, height, false); camera.aspect = width / height; camera.updateProjectionMatrix(); }
+async function initRuntime() {
+  if (renderStarted) {
+    engine?.resize();
+    return;
+  }
 
-const clock = new THREE.Clock();
-function animate() {
-  animationFrame = requestAnimationFrame(animate); if (!renderer || !scene || !camera) return; const t = clock.getElapsedTime(); controls.update();
-  rotatingObjects.forEach(({ object, x, y, z }) => { object.rotation.x += x * .01; object.rotation.y += y * .01; object.rotation.z += z * .01; });
-  pulseObjects.forEach(({ object, base, amount, speed }) => { const scale = base + Math.sin(t * speed) * amount; object.scale.setScalar(scale); });
-  floatingObjects.forEach(({ object, baseY, amount, speed, phase }) => { object.position.y = baseY + Math.sin(t * speed + phase) * amount; });
-  movingSignals.forEach(({ curve, signal, offset, speed }) => { signal.position.copy(curve.getPoint((t * speed + offset) % 1)); });
-  renderer.render(scene, camera);
+  if (!window.BABYLON) {
+    loginError.textContent = 'Nie udało się załadować silnika 3D.';
+    return;
+  }
+
+  const canvas = $('#worldCanvas');
+  engineMetric.textContent = 'BOOT';
+
+  try {
+    engine = await createEngine(canvas);
+    engineMetric.textContent = engineMode;
+    await buildScene(canvas);
+
+    engine.runRenderLoop(() => {
+      scene?.render();
+    });
+
+    window.addEventListener('resize', () => engine?.resize());
+    renderStarted = true;
+  } catch (error) {
+    console.error(error);
+    engineMetric.textContent = 'ERROR';
+    guideTitle.textContent = 'Renderer error';
+    guideCopy.textContent = 'Silnik 3D nie uruchomił się. Otwórz konsolę przeglądarki, aby zobaczyć szczegóły.';
+  }
 }
 
-if (sessionStorage.getItem(AUTH_KEY) === '1') authenticate();
+if (sessionStorage.getItem(AUTH_KEY) === '1') {
+  authenticate();
+}
