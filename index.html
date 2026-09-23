@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="theme-color" content="#050709" />
+  <title>Runtime / Operator Environment</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <section id="loginView" class="login-view" aria-label="Logowanie operatora">
+    <div class="login-grid" aria-hidden="true"></div>
+    <div class="login-scan" aria-hidden="true"></div>
+
+    <main class="login-card">
+      <div class="identity-row">
+        <div class="identity-mark" aria-hidden="true">
+          <span></span><span></span><span></span>
+        </div>
+        <div>
+          <p class="eyebrow">RUNTIME / ACCESS NODE</p>
+          <h1>Operator authentication</h1>
+        </div>
+      </div>
+
+      <p class="login-copy">Wejście do lokalnego środowiska obserwacji modelu. Ten ekran jest celowo prosty — dopiero po autoryzacji uruchamiany jest renderer 3D.</p>
+
+      <form id="loginForm" class="login-form" novalidate>
+        <label>
+          <span>LOGIN</span>
+          <input id="loginInput" autocomplete="off" inputmode="numeric" placeholder="123" />
+        </label>
+        <label>
+          <span>HASŁO</span>
+          <input id="passwordInput" type="password" autocomplete="off" inputmode="numeric" placeholder="123" />
+        </label>
+        <p id="loginError" class="login-error" role="alert" aria-live="polite"></p>
+        <button type="submit" class="login-submit">
+          <span>ENTER ENVIRONMENT</span>
+          <span class="button-arrow">↗</span>
+        </button>
+      </form>
+
+      <footer class="login-footer">
+        <span>DEMO GATE</span>
+        <span>123 / 123</span>
+        <span>NO BACKEND AUTH</span>
+      </footer>
+    </main>
+  </section>
+
+  <main id="runtimeView" class="runtime-view is-hidden" aria-label="Środowisko 3D">
+    <canvas id="worldCanvas" aria-label="Interaktywne środowisko 3D"></canvas>
+
+    <header class="runtime-topbar">
+      <div class="brand-lockup">
+        <span class="brand-code">R/01</span>
+        <div>
+          <strong>LLM RUNTIME</strong>
+          <small>SPATIAL OPERATIONS ENVIRONMENT</small>
+        </div>
+      </div>
+
+      <div class="runtime-metrics">
+        <div class="metric"><span>MODEL</span><b>SIM-01</b></div>
+        <div class="metric"><span>STATE</span><b class="status-ok"><i></i>READY</b></div>
+        <div class="metric"><span>MEMORY</span><b>3 NODES</b></div>
+        <div class="metric"><span>TOOLS</span><b>3 / 5</b></div>
+      </div>
+
+      <button id="logoutButton" class="ghost-button">LOG OUT</button>
+    </header>
+
+    <aside class="world-guide">
+      <p class="eyebrow">ENVIRONMENT</p>
+      <h2 id="guideTitle">Central Runtime</h2>
+      <p id="guideCopy">Przeciągnij myszą, aby obracać kamerę. Kliknij terminal w przestrzeni, aby otworzyć jego panel roboczy.</p>
+    </aside>
+
+    <div class="reticle" aria-hidden="true"><span></span></div>
+
+    <aside id="stationPanel" class="station-panel is-hidden" aria-live="polite">
+      <div class="panel-heading">
+        <div>
+          <p id="panelCode" class="eyebrow">ST-00</p>
+          <h2 id="panelTitle">Station</h2>
+        </div>
+        <button id="closePanel" class="icon-button" aria-label="Zamknij panel">×</button>
+      </div>
+      <div id="panelContent" class="panel-content"></div>
+    </aside>
+
+    <footer class="runtime-footer">
+      <span>DRAG: ORBIT</span>
+      <span>SCROLL: ZOOM</span>
+      <span>CLICK: OPEN STATION</span>
+      <span id="selectionReadout">NO STATION SELECTED</span>
+    </footer>
+  </main>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
